@@ -29,7 +29,7 @@ def split_dataset(args, dataset, k):
     def _it_to_list(_it):
         return list(zip(*list(_it)))
 
-    sss = StratifiedShuffleSplit(n_splits=k, random_state=args.seed, test_size=0.1)
+    sss = StratifiedShuffleSplit(n_splits=k, random_state=args.seed, test_size=0.2)
     Dm_indexes, Da_indexes = _it_to_list(sss.split(X, Y))
 
     return Dm_indexes, Da_indexes
@@ -81,18 +81,18 @@ def dict_to_namedtuple(d):
 
 def parse_args(kwargs):
     # combine with default args
-    kwargs['dataset'] =  kwargs['dataset'] if 'dataset' in kwargs else 'cifar10'
-    kwargs['network'] =  kwargs['network'] if 'network' in kwargs else 'resnet_cifar10'
+    kwargs['dataset'] =  kwargs['dataset'] if 'dataset' in kwargs else 'image_defect'
+    kwargs['network'] =  kwargs['network'] if 'network' in kwargs else 'efficientnet'
     kwargs['optimizer'] = kwargs['optimizer'] if 'optimizer' in kwargs else 'adam'
-    kwargs['learning_rate'] = kwargs['learning_rate'] if 'learning_rate' in kwargs else 0.1
-    kwargs['seed'] =  kwargs['seed'] if 'seed' in kwargs else None
+    kwargs['learning_rate'] = kwargs['learning_rate'] if 'learning_rate' in kwargs else 0.0001
+    kwargs['seed'] =  kwargs['seed'] if 'seed' in kwargs else 233
     kwargs['use_cuda'] =  kwargs['use_cuda'] if 'use_cuda' in kwargs else True
     kwargs['use_cuda'] =  kwargs['use_cuda'] and torch.cuda.is_available()
-    kwargs['num_workers'] = kwargs['num_workers'] if 'num_workers' in kwargs else 4
+    kwargs['num_workers'] = kwargs['num_workers'] if 'num_workers' in kwargs else 2
     kwargs['print_step'] = kwargs['print_step'] if 'print_step' in kwargs else 2000
     kwargs['val_step'] = kwargs['val_step'] if 'val_step' in kwargs else 2000
     kwargs['scheduler'] = kwargs['scheduler'] if 'scheduler' in kwargs else 'exp'
-    kwargs['batch_size'] = kwargs['batch_size'] if 'batch_size' in kwargs else 128
+    kwargs['batch_size'] = kwargs['batch_size'] if 'batch_size' in kwargs else 48
     kwargs['start_step'] = kwargs['start_step'] if 'start_step' in kwargs else 0
     kwargs['max_step'] = kwargs['max_step'] if 'max_step' in kwargs else 64000
     kwargs['fast_auto_augment'] = kwargs['fast_auto_augment'] if 'fast_auto_augment' in kwargs else False
@@ -167,6 +167,30 @@ def get_dataset(args, transform, split='train'):
                                                 transform=transform,
                                                 download=(split is 'val'))
 
+    elif args.dataset == 'image_defect':
+        if split in ['train', 'val', 'trainval']:
+            dataset_path = os.path.join(DATASET_PATH, 'train')
+            dataset = torchvision.datasets.ImageFolder(dataset_path,
+                                                       transform=transform)
+
+            if split in ['train', 'val']:
+                split_path = os.path.join(DATASET_PATH,
+                        'image-detection-batches-py', 'train_val_index.cp')
+
+                if not os.path.exists(split_path):
+                    [train_index], [val_index] = split_dataset(args, dataset, k=1)
+                    split_index = {'train':train_index, 'val':val_index}
+                    cp.dump(split_index, open(split_path, 'wb'))
+
+                split_index = cp.load(open(split_path, 'rb'))
+                dataset = Subset(dataset, split_index[split])
+
+        elif split == 'test':
+            dataset_path = os.path.join(DATASET_PATH, 'test')
+            dataset = torchvision.datasets.ImageFolder(dataset_path,
+                                                  transform=transform)
+        else:
+            raise Exception('Unknown split')
     else:
         raise Exception('Unknown dataset')
 
@@ -200,7 +224,7 @@ def get_inf_dataloader(args, dataset):
 
 def get_train_transform(args, model, log_dir=None):
     if args.fast_auto_augment:
-        assert args.dataset == 'cifar10' # TODO: FastAutoAugment for Imagenet
+        # assert args.dataset == 'cifar10' # TODO: FastAutoAugment for Imagenet
 
         from fast_auto_augment import fast_auto_augment
         if args.augment_path:
@@ -228,7 +252,17 @@ def get_train_transform(args, model, log_dir=None):
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor()
         ])
-
+    
+    elif args.dataset == 'image_defect':
+        resize_h, resize_w = (140, 720)
+        crop_h, crop_w = (100, 650)
+        transform = transforms.Compose([
+            transforms.Resize([resize_h, resize_w]),
+            # transforms.RandomCrop([crop_h, crop_w]),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.ToTensor()
+        ])
     else:
         raise Exception('Unknown Dataset')
 
@@ -250,7 +284,14 @@ def get_valid_transform(args, model):
             transforms.Resize([resize_h, resize_w]),
             transforms.ToTensor()
         ])
-
+    elif args.dataset == 'image_defect':
+        resize_h, resize_w = (140, 720)
+        crop_h, crop_w = (100, 650)
+        val_transform = transforms.Compose([
+            transforms.Resize([resize_h, resize_w]),
+            # transforms.CenterCrop([crop_h, crop_w]),
+            transforms.ToTensor()
+        ])
     else:
         raise Exception('Unknown Dataset')
 

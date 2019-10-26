@@ -27,7 +27,7 @@ DEFALUT_CANDIDATES = [
     Color,
     Brightness,
     Sharpness,
-    Cutout,
+    # Cutout,
 #     SamplePairing,
 ]
 
@@ -38,7 +38,9 @@ def train_child(args, model, dataset, subset_indx, device=None):
     criterion = nn.CrossEntropyLoss()
 
     dataset.transform = transforms.Compose([
-        transforms.Resize(32),
+        # transforms.Resize(32),
+        transforms.Resize([144, 780]),
+        transforms.RandomCrop([120, 720]),
         transforms.ToTensor()])
     subset = Subset(dataset, subset_indx)
     data_loader = get_inf_dataloader(args, subset)
@@ -100,8 +102,10 @@ def get_next_subpolicy(transform_candidates, op_per_subpolicy=2):
         subpolicy.append(transform_candidates[indx](prob, mag))
 
     subpolicy = transforms.Compose([
+        transforms.Resize([144, 780]),
+        transforms.RandomCrop([120, 720]),
         *subpolicy,
-        transforms.Resize(32),
+        # transforms.Resize(32),
         transforms.ToTensor()])
 
     return subpolicy
@@ -125,7 +129,9 @@ def search_subpolicies_hyperopt(args, transform_candidates, child_model, dataset
                      for transform, prob, mag in sampled]
 
         subpolicy = transforms.Compose([
-            transforms.Resize(32),
+            # transforms.Resize(32),
+            transforms.Resize([144, 780]),
+            transforms.CenterCrop([120, 720]),
             *subpolicy,
             transforms.ToTensor()])
 
@@ -150,8 +156,11 @@ def search_subpolicies_hyperopt(args, transform_candidates, child_model, dataset
                      transform_candidates[vals['transform2'][0]](vals['prob2'][0], vals['mag2'][0])]
         subpolicy = transforms.Compose([
             ## baseline augmentation
-            transforms.Pad(4),
-            transforms.RandomCrop(32),
+            transforms.Resize([144, 780]),
+            transforms.RandomCrop([120, 720]),
+            # transforms.Pad(4),
+            # transforms.RandomCrop(32),
+            # transforms.RandomCrop([140, 720]),
             transforms.RandomHorizontalFlip(),
             ## policy
             *subpolicy,
