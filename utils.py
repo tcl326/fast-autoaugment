@@ -9,12 +9,13 @@ import torchvision
 import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as transforms
-from torch.utils.data import Subset
+from torch.utils.data import Subset, ConcatDataset
 
 from sklearn.model_selection import StratifiedShuffleSplit
 
 
 DATASET_PATH = './data/'
+FIVESPLIT_PATH = './five_split/'
 current_epoch = 0
 
 
@@ -31,6 +32,31 @@ def split_dataset(args, dataset, k):
 
     sss = StratifiedShuffleSplit(n_splits=k, random_state=args.seed, test_size=0.2)
     Dm_indexes, Da_indexes = _it_to_list(sss.split(X, Y))
+
+    return Dm_indexes, Da_indexes
+
+
+def split_concat_dataset(args, concat_dataset, k):
+    # load dataset
+    assert isinstance(concat_dataset, ConcatDataset)
+    X = list(range(len(concat_dataset)))
+
+    def _it_to_list(_it):
+        return list(zip(*list(_it)))
+
+    Dm_indexes, Da_indexes = [], []
+    for i in range(k):
+        Dm_indx, Da_indx = [], []
+        start, end = 0, 0
+        for j, d in enumerate(concat_dataset.datasets):
+            end += len(d)
+            if i == j:
+                Da_indx.extend(list(range(start, end)))
+            else:
+                Dm_indx.extend(list(range(start, end)))
+            start = end
+        Dm_indexes.append(Dm_indx)
+        Da_indexes.append(Da_indx)
 
     return Dm_indexes, Da_indexes
 
@@ -166,6 +192,30 @@ def get_dataset(args, transform, split='train'):
                                                 split=split,
                                                 transform=transform,
                                                 download=(split is 'val'))
+    elif args.dataset == 'five_split':
+        if split in ['train', 'val', 'trainval']:
+            dataset_paths = [
+                os.path.join(FIVESPLIT_PATH, str(n)) for n in range(1, 6)]
+            dataset_list = [
+                torchvision.datasets.ImageFolder(path, transform=transform) for path in dataset_paths]
+            dataset = ConcatDataset(dataset_list)
+
+            if split in ['train', 'val']:
+                split_path = os.path.join(FIVESPLIT_PATH, 'train_val_index.cp')
+
+                if not os.path.exists(split_path):
+                    [train_index], [val_index] = split_concat_dataset(args, dataset, k=1)
+                    split_index = {'train':train_index, 'val':val_index}
+                    cp.dump(split_index, open(split_path, 'wb'))
+
+                split_index = cp.load(open(split_path, 'rb'))
+                dataset = Subset(dataset, split_index[split])
+        elif split == 'test':
+            dataset_path = os.path.join(FIVESPLIT_PATH, 'test')
+            dataset = torchvision.datasets.ImageFolder(dataset_path,
+                                                  transform=transform)
+        else:
+            raise Exception('Unknown split')
 
     elif args.dataset == 'image_defect':
         if split in ['train', 'val', 'trainval']:
@@ -232,7 +282,7 @@ def get_train_transform(args, model, log_dir=None):
             os.system('cp {} {}'.format(
                 args.augment_path, os.path.join(log_dir, 'augmentation.cp')))
         else:
-            transform = fast_auto_augment(args, model, K=4, B=1, num_process=4)
+            transform = fast_auto_augment(args, model, K=5, B=20, num_process=4)
             if log_dir:
                 cp.dump(transform, open(os.path.join(log_dir, 'augmentation.cp'), 'wb'))
 
@@ -285,6 +335,14 @@ def get_valid_transform(args, model):
             transforms.ToTensor()
         ])
     elif args.dataset == 'image_defect':
+        resize_h, resize_w = (140, 720)
+        crop_h, crop_w = (100, 650)
+        val_transform = transforms.Compose([
+            transforms.Resize([resize_h, resize_w]),
+            # transforms.CenterCrop([crop_h, crop_w]),
+            transforms.ToTensor()
+        ])
+    elif args.dataset == 'five_split':
         resize_h, resize_w = (140, 720)
         crop_h, crop_w = (100, 650)
         val_transform = transforms.Compose([

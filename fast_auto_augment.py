@@ -5,7 +5,7 @@ import torch
 import random
 import torchvision.transforms as transforms
 
-from torch.utils.data import Subset
+from torch.utils.data import Subset, ConcatDataset
 from sklearn.model_selection import StratifiedShuffleSplit
 from concurrent.futures import ProcessPoolExecutor
 
@@ -37,11 +37,16 @@ def train_child(args, model, dataset, subset_indx, device=None):
     scheduler = select_scheduler(args, optimizer)
     criterion = nn.CrossEntropyLoss()
 
-    dataset.transform = transforms.Compose([
+    image_transform = transforms.Compose([
         # transforms.Resize(32),
         transforms.Resize([144, 780]),
         transforms.RandomCrop([120, 720]),
         transforms.ToTensor()])
+    if isinstance(dataset, ConcatDataset):
+        for d in dataset.datasets:
+            d.transform = image_transform
+    else:
+        dataset.transform = image_transform
     subset = Subset(dataset, subset_indx)
     data_loader = get_inf_dataloader(args, subset)
 
@@ -84,7 +89,11 @@ def validate_child(args, model, dataset, subset_indx, transform, device=None):
         model = model.cuda()
         criterion = criterion.cuda()
 
-    dataset.transform = transform
+    if isinstance(dataset, ConcatDataset):
+        for d in dataset.datasets:
+            d.transform = transform
+    else:
+        dataset.transform = transform
     subset = Subset(dataset, subset_indx)
     data_loader = get_dataloader(args, subset, pin_memory=False)
 
@@ -209,8 +218,10 @@ def fast_auto_augment(args, model, transform_candidates=None, K=5, B=100, T=2, N
     if not transform_candidates:
         transform_candidates = DEFALUT_CANDIDATES
 
-    # split
-    Dm_indexes, Da_indexes = split_dataset(args, dataset, K)
+    if isinstance(dataset, ConcatDataset):
+        Dm_indexes, Da_indexes = split_concat_dataset(args, dataset, K)
+    else:
+        Dm_indexes, Da_indexes = split_dataset(args, dataset, K)
 
     with ProcessPoolExecutor(max_workers=num_process) as executor:
         for k, (Dm_indx, Da_indx) in enumerate(zip(Dm_indexes, Da_indexes)):
